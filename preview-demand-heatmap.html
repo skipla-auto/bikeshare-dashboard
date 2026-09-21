@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>曜日×時間メッシュ(プレビュー)</title>
+<meta name="description" content="曜日×時間ごとの空き自転車数を、雨の日/雨でない日で比較するメッシュ図のダミーデータによる試作">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700;900&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+  :root {
+    --bg: #f1f6f4;
+    --surface: #ffffff;
+    --surface-2: #e7efec;
+    --border: #d4ddd9;
+    --text-primary: #12211d;
+    --text-secondary: #4d625c;
+    --text-muted: #82958f;
+
+    --accent-h: 166; --accent-s: 78%;
+    --accent: #0e8a70;
+
+    --warning: #c97112;
+    --warning-soft: #fbedd9;
+
+    --shadow: 0 1px 2px rgba(18, 33, 29, 0.05), 0 8px 24px rgba(18, 33, 29, 0.07);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1613;
+      --surface: #16211d;
+      --surface-2: #1c2a25;
+      --border: #2b3b35;
+      --text-primary: #eaf3f0;
+      --text-secondary: #a7bcb5;
+      --text-muted: #718a82;
+      --accent: #45d9b6;
+      --warning: #eba03f;
+      --warning-soft: #3a2c14;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1613; --surface: #16211d; --surface-2: #1c2a25; --border: #2b3b35;
+    --text-primary: #eaf3f0; --text-secondary: #a7bcb5; --text-muted: #718a82;
+    --accent: #45d9b6; --warning: #eba03f; --warning-soft: #3a2c14;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.4);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text-primary);
+    font-family: "Noto Sans JP", "Hiragino Sans", -apple-system, sans-serif;
+    margin: 0; padding: 24px 20px 72px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+
+  .back-link { display: inline-block; font-size: 12.5px; color: var(--text-secondary); text-decoration: none; margin-bottom: 10px; }
+  .back-link:hover { color: var(--accent); }
+
+  h1 {
+    font-family: "Zen Kaku Gothic New", "Noto Sans JP", sans-serif;
+    font-weight: 900; font-size: 25px; margin: 0 0 6px; text-wrap: balance;
+  }
+  .subtitle { color: var(--text-secondary); font-size: 13px; margin: 0 0 16px; }
+
+  .dummy-banner {
+    display: flex; gap: 10px; align-items: flex-start;
+    background: var(--warning-soft);
+    border: 1px solid var(--warning);
+    color: var(--text-primary);
+    border-radius: 12px;
+    padding: 12px 16px;
+    font-size: 13px;
+    line-height: 1.6;
+    margin-bottom: 22px;
+  }
+  .dummy-banner .icon { font-size: 16px; flex: none; }
+  .dummy-banner strong { color: var(--warning); }
+
+  .station-note {
+    font-size: 12.5px; color: var(--text-secondary); margin-bottom: 20px;
+  }
+
+  .panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(430px, 1fr)); gap: 20px; margin-bottom: 20px; }
+
+  .panel {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    padding: 16px 18px 14px; box-shadow: var(--shadow);
+  }
+  .panel-title {
+    font-family: "Zen Kaku Gothic New", "Noto Sans JP", sans-serif;
+    font-weight: 700; font-size: 14px; margin-bottom: 2px;
+  }
+  .panel-sub { font-size: 11.5px; color: var(--text-muted); margin-bottom: 12px; }
+
+  .mesh { display: grid; grid-template-columns: 22px repeat(24, 1fr); gap: 2px; }
+  .mesh .corner { }
+  .col-label {
+    font-size: 8.5px; color: var(--text-muted); text-align: center;
+    font-family: "JetBrains Mono", monospace;
+  }
+  .row-label {
+    font-size: 10.5px; color: var(--text-secondary); display: flex;
+    align-items: center; justify-content: center;
+  }
+  .cell {
+    aspect-ratio: 1; border-radius: 3px; position: relative; cursor: default;
+    min-width: 10px;
+  }
+
+  .legend {
+    display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 11px; color: var(--text-muted);
+  }
+  .legend-ramp {
+    width: 140px; height: 10px; border-radius: 5px;
+    background: linear-gradient(to right, hsl(166 78% 94%), hsl(166 78% 32%));
+    border: 1px solid var(--border);
+  }
+
+  .tooltip {
+    position: absolute; pointer-events: none;
+    background: var(--text-primary); color: var(--bg);
+    font-size: 11.5px; line-height: 1.5; padding: 6px 9px; border-radius: 7px;
+    white-space: nowrap; transform: translate(-50%, -100%); opacity: 0;
+    transition: opacity .08s ease; z-index: 10; font-variant-numeric: tabular-nums;
+  }
+  .tooltip strong { font-weight: 700; }
+
+  .table-toggle {
+    border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary);
+    font: inherit; font-size: 12.5px; padding: 7px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 10px;
+  }
+  .table-toggle:hover { color: var(--text-primary); border-color: var(--accent); }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); max-height: 360px; }
+  table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  th, td { text-align: left; padding: 6px 9px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--text-muted); font-weight: 500; font-size: 10px; text-transform: uppercase; position: sticky; top: 0; background: var(--surface); }
+  td { font-variant-numeric: tabular-nums; }
+
+  footer { margin-top: 24px; font-size: 11.5px; color: var(--text-muted); line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back-link" href="trends.html">← 推移ページに戻る</a>
+  <h1>曜日×時間メッシュ(プレビュー)</h1>
+  <p class="subtitle">曜日・時間帯ごとの平均空き自転車数を、雨の日と雨でない日で比較するイメージ</p>
+
+  <div class="dummy-banner">
+    <span class="icon">⚠</span>
+    <span><strong>これはダミーデータです。</strong> 実際の収集データ(data/history.ndjson)はまだ1晩分しか無く、曜日×時間の集計を出すには全く足りません。
+    このページは「集まったらこう見える」というイメージ確認用に、実際に近い値をその場で予測生成しています。
+    本物のデータで作った版ではありません(データが数週間分貯まり次第、本番ページに差し替えます)。</span>
+  </div>
+
+  <p class="station-note">対象ポート(試作): <strong>D6-25.新宿駅東南口自転車駐輪場</strong>(定員30台・駅前で朝の通勤利用が多いと想定)</p>
+
+  <div class="panels">
+    <div class="panel">
+      <div class="panel-title">雨でない日</div>
+      <div class="panel-sub">平均利用可能台数(ダミー)</div>
+      <div class="mesh" id="meshDry"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">雨の日</div>
+      <div class="panel-sub">平均利用可能台数(ダミー) — 通勤の自転車利用が減る想定</div>
+      <div class="mesh" id="meshRain"></div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span>0台</span>
+    <span class="legend-ramp"></span>
+    <span>30台(満車)</span>
+  </div>
+
+  <button class="table-toggle" id="tableToggle" type="button" style="margin-top:20px;">ダミーデータを表で見る</button>
+  <div class="table-wrap" id="tableWrap" hidden>
+    <table>
+      <thead><tr><th>天気</th><th>曜日</th><th>時</th><th>平均台数(ダミー)</th></tr></thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+
+  <footer>
+    このページのグラフは全てシミュレーション値です。データの出所は無く、モデル(通勤時間帯の減少・夜間の回復・雨天時の利用減)に基づいてその場で計算しています。<br>
+    実データ版は <a href="trends.html" style="color:var(--text-secondary);">推移ページ</a> を参照してください。
+  </footer>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var WEEKDAYS = ["月", "火", "水", "木", "金", "土", "日"];
+  var CAPACITY = 30;
+
+  // Synthetic model: overnight accumulation, morning commute drain,
+  // partial recovery through the day, evening return bump. Weekends
+  // flatter. Rain mutes the commute peaks (fewer people cycling out).
+  function baseCurve(hour, isWeekend) {
+    var commuteOut = isWeekend ? 0 : gaussian(hour, 8, 1.3) * 22;
+    var commuteBack = isWeekend ? 0 : gaussian(hour, 18.5, 1.6) * 10;
+    var overnight = gaussian(hour, 3, 3.5) * 8;
+    var leisureBump = isWeekend ? gaussian(hour, 13, 3) * 9 : 0;
+    var base = 18 + overnight + leisureBump - commuteOut + commuteBack * 0.4;
+    return clamp(base, 0, CAPACITY);
+  }
+
+  function gaussian(x, mu, sigma) {
+    return Math.exp(-0.5 * Math.pow((x - mu) / sigma, 2));
+  }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  function valueFor(weekdayIdx, hour, rain) {
+    var isWeekend = weekdayIdx >= 5;
+    var v = baseCurve(hour, isWeekend);
+    if (rain) {
+      // rain suppresses the commute dip: fewer bikes rented out, so
+      // availability stays closer to the overnight baseline.
+      var noRainV = v;
+      var flattened = 18 + gaussian(hour, 3, 3.5) * 8;
+      v = noRainV * 0.35 + flattened * 0.65;
+    }
+    // deterministic pseudo-noise so re-render is stable but not perfectly smooth
+    var seed = Math.sin(weekdayIdx * 12.9898 + hour * 78.233 + (rain ? 4.7 : 1.1)) * 43758.5453;
+    var noise = (seed - Math.floor(seed) - 0.5) * 2.2;
+    return Math.round(clamp(v + noise, 0, CAPACITY));
+  }
+
+  function colorFor(v) {
+    var t = clamp(v / CAPACITY, 0, 1);
+    var lightness = 94 - t * 62; // 94% (near-empty) -> 32% (near-full)
+    return "hsl(166 78% " + lightness.toFixed(0) + "%)";
+  }
+
+  function buildMesh(container, rain) {
+    var html = "<div class=\"corner\"></div>";
+    for (var h = 0; h < 24; h++) {
+      html += "<div class=\"col-label\">" + (h % 3 === 0 ? h : "") + "</div>";
+    }
+    for (var d = 0; d < 7; d++) {
+      html += "<div class=\"row-label\">" + WEEKDAYS[d] + "</div>";
+      for (var h2 = 0; h2 < 24; h2++) {
+        var v = valueFor(d, h2, rain);
+        html += "<div class=\"cell\" style=\"background:" + colorFor(v) + "\" data-d=\"" + d + "\" data-h=\"" + h2 + "\" data-v=\"" + v + "\" data-rain=\"" + rain + "\"></div>";
+      }
+    }
+    container.innerHTML = html;
+  }
+
+  var meshDry = document.getElementById("meshDry");
+  var meshRain = document.getElementById("meshRain");
+  buildMesh(meshDry, false);
+  buildMesh(meshRain, true);
+
+  var tooltip = document.getElementById("tooltip");
+  [meshDry, meshRain].forEach(function (mesh) {
+    mesh.addEventListener("pointermove", function (evt) {
+      var cell = evt.target.closest(".cell");
+      if (!cell) { tooltip.style.opacity = "0"; return; }
+      var d = +cell.dataset.d, h = +cell.dataset.h, v = +cell.dataset.v, rain = cell.dataset.rain === "true";
+      tooltip.innerHTML = "<div><strong>" + v + "台</strong>(ダミー)</div><div>" + WEEKDAYS[d] + "曜 " + h + "時台 ・ " + (rain ? "雨" : "雨でない") + "</div>";
+      tooltip.style.left = evt.clientX + "px";
+      tooltip.style.top = (evt.clientY + window.scrollY - 10) + "px";
+      tooltip.style.opacity = "1";
+    });
+    mesh.addEventListener("pointerleave", function () { tooltip.style.opacity = "0"; });
+  });
+
+  // Table view (accessibility: same data reachable without hover)
+  var tableBody = document.getElementById("tableBody");
+  var rowsHtml = "";
+  [false, true].forEach(function (rain) {
+    for (var d = 0; d < 7; d++) {
+      for (var h = 0; h < 24; h++) {
+        var v = valueFor(d, h, rain);
+        rowsHtml += "<tr><td>" + (rain ? "雨" : "雨でない") + "</td><td>" + WEEKDAYS[d] + "</td><td>" + h + "時</td><td>" + v + "台</td></tr>";
+      }
+    }
+  });
+  tableBody.innerHTML = rowsHtml;
+
+  var tableToggle = document.getElementById("tableToggle");
+  var tableWrap = document.getElementById("tableWrap");
+  tableToggle.addEventListener("click", function () {
+    var show = tableWrap.hidden;
+    tableWrap.hidden = !show;
+    tableToggle.textContent = show ? "ダミーデータの表を隠す" : "ダミーデータを表で見る";
+  });
+})();
+</script>
+</body>
+</html>

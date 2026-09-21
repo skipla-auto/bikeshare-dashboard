@@ -17,13 +17,18 @@ TRACKED_STATIONS_PATH = REPO_ROOT / "data" / "tracked-stations.json"
 HISTORY_PATH = REPO_ROOT / "data" / "history.ndjson"
 
 GBFS_STATUS_URL = "https://api-public.odpt.org/api/v4/gbfs/docomo-cycle-tokyo/station_status.json"
-WEATHER_URL = (
-    "https://api.open-meteo.com/v1/forecast"
-    "?latitude=35.68&longitude=139.75"
-    "&current=temperature_2m,precipitation,weather_code"
-    "&timezone=Asia%2FTokyo"
-)
 JST = timezone(timedelta(hours=9))
+
+
+def weather_url_for(stations):
+    lats = ",".join(str(s["lat"]) for s in stations)
+    lons = ",".join(str(s["lon"]) for s in stations)
+    return (
+        "https://api.open-meteo.com/v1/forecast"
+        f"?latitude={lats}&longitude={lons}"
+        "&current=temperature_2m,precipitation,weather_code"
+        "&timezone=Asia%2FTokyo"
+    )
 
 # 2026 (令和8年) national holidays, per the National Astronomical
 # Observatory of Japan's official calendar. Extend this set each
@@ -60,27 +65,37 @@ def ensure_git_identity():
 
 def main():
     tracked = json.loads(TRACKED_STATIONS_PATH.read_text())
-    tracked_by_id = {s["station_id"]: s["name"] for s in tracked}
+    tracked_by_id = {s["station_id"]: s for s in tracked}
 
     status = fetch_json(GBFS_STATUS_URL)
     status_by_id = {s["station_id"]: s for s in status["data"]["stations"]}
 
     try:
-        weather = fetch_json(WEATHER_URL)["current"]
+        weather_results = fetch_json(weather_url_for(tracked))
+        # Open-Meteo returns a plain object (not a list) when given a single
+        # coordinate pair; normalize so indexing by position always works.
+        if isinstance(weather_results, dict):
+            weather_results = [weather_results]
+        weather_by_id = {
+            s["station_id"]: weather_results[i]["current"]
+            for i, s in enumerate(tracked)
+        }
     except Exception as exc:  # weather is a nice-to-have, never block the snapshot
         print(f"weather fetch failed, continuing without it: {exc}", file=sys.stderr)
-        weather = {}
+        weather_by_id = {}
 
     now_utc = datetime.now(timezone.utc)
     now_jst = now_utc.astimezone(JST)
     date_jst = now_jst.strftime("%Y-%m-%d")
 
     lines = []
-    for station_id, name in tracked_by_id.items():
+    for station_id, info in tracked_by_id.items():
+        name = info["name"]
         s = status_by_id.get(station_id)
         if s is None:
             print(f"station {station_id} ({name}) missing from GBFS response, skipping", file=sys.stderr)
             continue
+        weather = weather_by_id.get(station_id, {})
         lines.append(json.dumps({
             "ts": now_utc.isoformat(timespec="seconds").replace("+00:00", "Z"),
             "date_jst": date_jst,
