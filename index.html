@@ -1,0 +1,581 @@
+<title>ポート空き状況</title>
+<meta name="description" content="よく使うドコモ・バイクシェアのポートだけを登録して、リアルタイムの空き自転車・空きドックを一目で確認するツール">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700;900&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+  :root {
+    --bg: #f1f6f4;
+    --surface: #ffffff;
+    --surface-2: #e7efec;
+    --border: #d4ddd9;
+    --text-primary: #12211d;
+    --text-secondary: #4d625c;
+    --text-muted: #82958f;
+
+    --accent: #0e8a70;
+    --accent-strong: #086352;
+    --accent-soft: #dcf2ec;
+    --accent-ink: #ffffff;
+
+    --good: #1f9d55;
+    --good-soft: #e4f6ec;
+    --warning: #c97112;
+    --warning-soft: #fbedd9;
+    --critical: #d23c3c;
+    --critical-soft: #fbe4e4;
+
+    --shadow: 0 1px 2px rgba(18, 33, 29, 0.05), 0 8px 24px rgba(18, 33, 29, 0.07);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1613;
+      --surface: #16211d;
+      --surface-2: #1c2a25;
+      --border: #2b3b35;
+      --text-primary: #eaf3f0;
+      --text-secondary: #a7bcb5;
+      --text-muted: #718a82;
+
+      --accent: #45d9b6;
+      --accent-strong: #6ee8c9;
+      --accent-soft: #163a30;
+      --accent-ink: #08201a;
+
+      --good: #3fcc7a;
+      --good-soft: #143627;
+      --warning: #eba03f;
+      --warning-soft: #3a2c14;
+      --critical: #f2716f;
+      --critical-soft: #3d1d1e;
+
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #0e1613;
+    --surface: #16211d;
+    --surface-2: #1c2a25;
+    --border: #2b3b35;
+    --text-primary: #eaf3f0;
+    --text-secondary: #a7bcb5;
+    --text-muted: #718a82;
+
+    --accent: #45d9b6;
+    --accent-strong: #6ee8c9;
+    --accent-soft: #163a30;
+    --accent-ink: #08201a;
+
+    --good: #3fcc7a;
+    --good-soft: #143627;
+    --warning: #eba03f;
+    --warning-soft: #3a2c14;
+    --critical: #f2716f;
+    --critical-soft: #3d1d1e;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.4);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: "Noto Sans JP", "Hiragino Sans", -apple-system, sans-serif;
+    margin: 0;
+    padding: 28px 20px 72px;
+  }
+
+  .wrap { max-width: 880px; margin: 0 auto; }
+
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+
+  h1 {
+    font-family: "Zen Kaku Gothic New", "Noto Sans JP", sans-serif;
+    font-weight: 900;
+    font-size: 26px;
+    letter-spacing: 0.01em;
+    margin: 0 0 4px;
+    text-wrap: balance;
+  }
+
+  .subtitle {
+    color: var(--text-secondary);
+    font-size: 13px;
+    margin: 0;
+  }
+
+  .status-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--good);
+    box-shadow: 0 0 0 3px var(--good-soft);
+    flex: none;
+  }
+
+  .dot.stale { background: var(--warning); box-shadow: 0 0 0 3px var(--warning-soft); }
+  .dot.error { background: var(--critical); box-shadow: 0 0 0 3px var(--critical-soft); }
+
+  button.refresh {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 7px;
+    cursor: pointer;
+  }
+  button.refresh:hover { color: var(--text-primary); border-color: var(--accent); }
+  button.refresh:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .search-panel {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px 16px;
+    box-shadow: var(--shadow);
+    margin-bottom: 24px;
+  }
+
+  .search-panel label {
+    display: block;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+
+  .search-panel input {
+    width: 100%;
+    font: inherit;
+    font-size: 15px;
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--surface-2);
+    color: var(--text-primary);
+  }
+  .search-panel input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .search-results {
+    position: absolute;
+    left: 16px;
+    right: 16px;
+    top: calc(100% - 4px);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    max-height: 280px;
+    overflow-y: auto;
+    z-index: 5;
+  }
+  .search-results:empty { display: none; }
+
+  .search-result {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: baseline;
+    width: 100%;
+    text-align: left;
+    padding: 9px 12px;
+    border: none;
+    border-top: 1px solid var(--border);
+    background: none;
+    font: inherit;
+    font-size: 13px;
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+  .search-result:first-child { border-top: none; }
+  .search-result:hover, .search-result:focus-visible { background: var(--accent-soft); }
+  .search-result .cap { color: var(--text-muted); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+  .empty-hint {
+    font-size: 13px;
+    color: var(--text-muted);
+    padding: 2px 2px 0;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 14px;
+  }
+
+  .tile {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--good);
+    border-radius: 12px;
+    padding: 16px 16px 14px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .tile.state-warning { border-left-color: var(--warning); }
+  .tile.state-critical { border-left-color: var(--critical); }
+  .tile.state-offline { border-left-color: var(--border); opacity: 0.6; }
+
+  .tile-head { display: flex; justify-content: space-between; gap: 8px; }
+
+  .tile-name {
+    font-family: "Zen Kaku Gothic New", "Noto Sans JP", sans-serif;
+    font-weight: 700;
+    font-size: 14.5px;
+    line-height: 1.35;
+  }
+
+  .tile-code {
+    display: block;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10.5px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .remove-btn {
+    flex: none;
+    border: none;
+    background: var(--surface-2);
+    color: var(--text-muted);
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+  }
+  .remove-btn:hover { color: var(--critical); background: var(--critical-soft); }
+  .remove-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .stat-row { display: flex; align-items: baseline; gap: 18px; }
+
+  .stat .num {
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 700;
+    font-size: 28px;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat .label {
+    display: block;
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .capacity-bar {
+    height: 7px;
+    border-radius: 4px;
+    background: var(--surface-2);
+    overflow: hidden;
+    display: flex;
+  }
+  .capacity-bar .bikes { background: var(--accent); height: 100%; }
+  .capacity-bar .docks { background: var(--border); height: 100%; }
+
+  .tile-foot {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tile.skeleton .num, .tile.skeleton .tile-code { color: transparent; background: var(--surface-2); border-radius: 4px; }
+
+  footer {
+    margin-top: 28px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+    line-height: 1.7;
+  }
+  footer a { color: var(--text-secondary); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .tile { transition: border-color .3s ease; }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>ポート空き状況</h1>
+      <p class="subtitle">ドコモ・バイクシェア(東京エリア) — 登録したポートの空き自転車・空きドックだけを表示</p>
+    </div>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <div class="status-line">
+        <span class="dot" id="statusDot"></span>
+        <span id="statusText">読み込み中…</span>
+      </div>
+      <button class="refresh" id="refreshBtn" type="button">今すぐ更新</button>
+    </div>
+  </header>
+
+  <div class="search-panel">
+    <label for="stationSearch">ポートを検索して追加</label>
+    <input id="stationSearch" type="text" placeholder="例: 新宿駅、六本木、秋葉原…" autocomplete="off">
+    <div class="search-results" id="searchResults"></div>
+  </div>
+
+  <div id="grid" class="grid"></div>
+  <p class="empty-hint" id="emptyHint" hidden>登録済みのポートがありません。上の検索から追加してください。</p>
+
+  <footer>
+    データ提供: 公共交通オープンデータセンター(ODPT) / ドコモ・バイクシェア GBFS フィード(CC BY 4.0)。60秒ごとに自動更新。<br>
+    登録ポートはこの端末のブラウザにのみ保存されます(サーバー送信なし)。
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var GBFS_BASE = "https://api-public.odpt.org/api/v4/gbfs/docomo-cycle-tokyo/";
+  var STATION_INFO_CACHE_KEY = "bikeshare.stationInfo.v1";
+  var STATION_INFO_TTL_MS = 6 * 60 * 60 * 1000;
+  var PINNED_KEY = "bikeshare.pinned.v1";
+  var POLL_MS = 60 * 1000;
+
+  var DEFAULT_PINNED = ["10926", "10252", "10303"];
+
+  var stationInfoById = {};
+  var pinned = loadPinned();
+  var pollTimer = null;
+
+  var grid = document.getElementById("grid");
+  var emptyHint = document.getElementById("emptyHint");
+  var searchInput = document.getElementById("stationSearch");
+  var searchResults = document.getElementById("searchResults");
+  var statusDot = document.getElementById("statusDot");
+  var statusText = document.getElementById("statusText");
+  var refreshBtn = document.getElementById("refreshBtn");
+
+  function loadPinned() {
+    try {
+      var raw = localStorage.getItem(PINNED_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return DEFAULT_PINNED.slice();
+  }
+
+  function savePinned() {
+    try { localStorage.setItem(PINNED_KEY, JSON.stringify(pinned)); } catch (e) {}
+  }
+
+  function loadCachedStationInfo() {
+    try {
+      var raw = localStorage.getItem(STATION_INFO_CACHE_KEY);
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      if (Date.now() - parsed.savedAt > STATION_INFO_TTL_MS) return null;
+      return parsed.stations;
+    } catch (e) { return null; }
+  }
+
+  function saveCachedStationInfo(stations) {
+    try {
+      localStorage.setItem(STATION_INFO_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), stations: stations }));
+    } catch (e) {}
+  }
+
+  function fetchJson(path) {
+    return fetch(GBFS_BASE + path, { cache: "no-store" }).then(function (res) {
+      if (!res.ok) throw new Error(path + " -> " + res.status);
+      return res.json();
+    });
+  }
+
+  function ensureStationInfo() {
+    var cached = loadCachedStationInfo();
+    if (cached) {
+      stationInfoById = indexById(cached);
+      return Promise.resolve();
+    }
+    return fetchJson("station_information.json").then(function (json) {
+      var stations = json.data.stations;
+      saveCachedStationInfo(stations);
+      stationInfoById = indexById(stations);
+    });
+  }
+
+  function indexById(stations) {
+    var map = {};
+    for (var i = 0; i < stations.length; i++) map[stations[i].station_id] = stations[i];
+    return map;
+  }
+
+  function renderSkeleton() {
+    grid.innerHTML = "";
+    emptyHint.hidden = pinned.length !== 0;
+    pinned.forEach(function (id) {
+      var info = stationInfoById[id];
+      var tile = document.createElement("div");
+      tile.className = "tile skeleton";
+      tile.dataset.id = id;
+      tile.innerHTML = tileInnerHtml(info, null);
+      grid.appendChild(tile);
+    });
+    wireRemoveButtons();
+  }
+
+  function tileInnerHtml(info, status) {
+    var name = info ? info.name : "読み込み中…";
+    var code = info ? "#" + info.station_id + " ・ 定員 " + info.capacity : "";
+    var bikes = status ? status.num_bikes_available : "–";
+    var docks = status ? status.num_docks_available : "–";
+    return (
+      '<div class="tile-head">' +
+        '<div class="tile-name">' + escapeHtml(name) + '<span class="tile-code">' + escapeHtml(code) + '</span></div>' +
+        '<button class="remove-btn" type="button" aria-label="このポートを削除">×</button>' +
+      '</div>' +
+      '<div class="stat-row">' +
+        '<div class="stat"><span class="num">' + bikes + '</span><span class="label">利用可能な自転車</span></div>' +
+        '<div class="stat"><span class="num">' + docks + '</span><span class="label">空きドック</span></div>' +
+      '</div>' +
+      '<div class="capacity-bar" aria-hidden="true"><div class="bikes" style="flex:' + (status ? status.num_bikes_available : 0) + '"></div><div class="docks" style="flex:' + (status ? status.num_docks_available : 0) + '"></div></div>' +
+      '<div class="tile-foot"><span>' + (status ? relativeTime(status.last_reported) : "") + '</span><span>' + (status && status.is_renting === false ? "貸出停止中" : "") + '</span></div>'
+    );
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function relativeTime(unixSeconds) {
+    var diff = Math.max(0, Math.round(Date.now() / 1000) - unixSeconds);
+    if (diff < 60) return diff + "秒前";
+    if (diff < 3600) return Math.floor(diff / 60) + "分前";
+    return Math.floor(diff / 3600) + "時間前";
+  }
+
+  function classifyState(status, capacity) {
+    if (!status || status.is_renting === false) return "offline";
+    if (status.num_bikes_available === 0) return "critical";
+    if (capacity && status.num_bikes_available / capacity <= 0.2) return "warning";
+    return "good";
+  }
+
+  function renderStatuses(statusById) {
+    grid.innerHTML = "";
+    emptyHint.hidden = pinned.length !== 0;
+    pinned.forEach(function (id) {
+      var info = stationInfoById[id];
+      var status = statusById[id];
+      var tile = document.createElement("div");
+      var state = classifyState(status, info ? info.capacity : 0);
+      tile.className = "tile state-" + state;
+      tile.dataset.id = id;
+      tile.innerHTML = tileInnerHtml(info, status);
+      grid.appendChild(tile);
+    });
+    wireRemoveButtons();
+  }
+
+  function wireRemoveButtons() {
+    grid.querySelectorAll(".remove-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.closest(".tile").dataset.id;
+        pinned = pinned.filter(function (x) { return x !== id; });
+        savePinned();
+        renderSkeleton();
+        poll();
+      });
+    });
+  }
+
+  function setStatus(mode, text) {
+    statusDot.className = "dot" + (mode === "error" ? " error" : mode === "stale" ? " stale" : "");
+    statusText.textContent = text;
+  }
+
+  function poll() {
+    setStatus("ok", "更新中…");
+    fetchJson("station_status.json").then(function (json) {
+      var statusById = {};
+      json.data.stations.forEach(function (s) { statusById[s.station_id] = s; });
+      renderStatuses(statusById);
+      setStatus("ok", "最終更新 " + new Date().toLocaleTimeString("ja-JP"));
+    }).catch(function (err) {
+      setStatus("error", "取得に失敗しました(再試行します)");
+      console.error(err);
+    });
+  }
+
+  function schedulePoll() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(poll, POLL_MS);
+  }
+
+  function runSearch(query) {
+    searchResults.innerHTML = "";
+    var q = query.trim();
+    if (!q) return;
+    var matches = [];
+    for (var id in stationInfoById) {
+      var s = stationInfoById[id];
+      if (s.name.indexOf(q) !== -1 && pinned.indexOf(id) === -1) {
+        matches.push(s);
+        if (matches.length >= 8) break;
+      }
+    }
+    matches.forEach(function (s) {
+      var row = document.createElement("button");
+      row.type = "button";
+      row.className = "search-result";
+      row.innerHTML = '<span>' + escapeHtml(s.name) + '</span><span class="cap">定員' + s.capacity + '</span>';
+      row.addEventListener("click", function () {
+        pinned.push(s.station_id);
+        savePinned();
+        searchInput.value = "";
+        searchResults.innerHTML = "";
+        renderSkeleton();
+        poll();
+      });
+      searchResults.appendChild(row);
+    });
+  }
+
+  searchInput.addEventListener("input", function () { runSearch(searchInput.value); });
+  document.addEventListener("click", function (e) {
+    if (!e.target.closest(".search-panel")) searchResults.innerHTML = "";
+  });
+  refreshBtn.addEventListener("click", poll);
+
+  ensureStationInfo().then(function () {
+    renderSkeleton();
+    poll();
+    schedulePoll();
+  }).catch(function (err) {
+    setStatus("error", "ポート情報の取得に失敗しました");
+    console.error(err);
+  });
+})();
+</script>
