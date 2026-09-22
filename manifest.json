@@ -1,0 +1,14 @@
+{
+  "name": "成城 空き状況",
+  "short_name": "成城 空き状況",
+  "description": "成城エリアのドコモ・バイクシェア4ポートの空き自転車をひと目で確認",
+  "start_url": "seijo.html",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#f1f6f4",
+  "theme_color": "#0e8a70",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

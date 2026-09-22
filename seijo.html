@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>成城 空き状況</title>
+<meta name="description" content="成城エリア4ポート(NTT砧ビル・NTT成城ビル・オダクル成城学園前1・2)の空き自転車をひと目で確認">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="成城 空き状況">
+<meta name="theme-color" content="#0e8a70">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@700;900&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@600;700&display=swap">
+<style>
+  :root {
+    --bg: #f1f6f4; --surface: #ffffff; --surface-2: #e7efec; --border: #d4ddd9;
+    --text-primary: #12211d; --text-secondary: #4d625c; --text-muted: #82958f;
+    --accent: #0e8a70; --accent-soft: #dcf2ec;
+    --good: #1f9d55; --good-soft: #e4f6ec;
+    --warning: #c97112; --warning-soft: #fbedd9;
+    --critical: #d23c3c; --critical-soft: #fbe4e4;
+    --shadow: 0 1px 2px rgba(18,33,29,.05), 0 8px 24px rgba(18,33,29,.07);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1613; --surface: #16211d; --surface-2: #1c2a25; --border: #2b3b35;
+      --text-primary: #eaf3f0; --text-secondary: #a7bcb5; --text-muted: #718a82;
+      --accent: #45d9b6; --accent-soft: #163a30;
+      --good: #3fcc7a; --good-soft: #143627;
+      --warning: #eba03f; --warning-soft: #3a2c14;
+      --critical: #f2716f; --critical-soft: #3d1d1e;
+      --shadow: 0 1px 2px rgba(0,0,0,.35), 0 8px 24px rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1613; --surface: #16211d; --surface-2: #1c2a25; --border: #2b3b35;
+    --text-primary: #eaf3f0; --text-secondary: #a7bcb5; --text-muted: #718a82;
+    --accent: #45d9b6; --accent-soft: #163a30;
+    --good: #3fcc7a; --good-soft: #143627;
+    --warning: #eba03f; --warning-soft: #3a2c14;
+    --critical: #f2716f; --critical-soft: #3d1d1e;
+    --shadow: 0 1px 2px rgba(0,0,0,.35), 0 8px 24px rgba(0,0,0,.4);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: var(--bg); color: var(--text-primary);
+    font-family: "Noto Sans JP", "Hiragino Sans", -apple-system, sans-serif;
+    margin: 0; padding: max(20px, env(safe-area-inset-top)) 16px 40px;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; }
+  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  h1 {
+    font-family: "Zen Kaku Gothic New", "Noto Sans JP", sans-serif;
+    font-weight: 900; font-size: 21px; margin: 0;
+  }
+  .status-line {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums;
+  }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 3px var(--good-soft); }
+  .dot.error { background: var(--critical); box-shadow: 0 0 0 3px var(--critical-soft); }
+
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+  .tile {
+    min-width: 0;
+    background: var(--surface); border: 1px solid var(--border);
+    border-left: 5px solid var(--good); border-radius: 14px;
+    padding: 16px 14px 14px; box-shadow: var(--shadow);
+  }
+  .tile.state-warning { border-left-color: var(--warning); }
+  .tile.state-critical { border-left-color: var(--critical); }
+  .tile.state-offline { border-left-color: var(--border); opacity: .6; }
+
+  .tile-name { font-size: 12px; font-weight: 700; line-height: 1.35; margin-bottom: 10px; min-height: 32px; overflow-wrap: anywhere; }
+  .tile-num {
+    font-family: "JetBrains Mono", monospace; font-weight: 700; font-size: 34px;
+    line-height: 1; font-variant-numeric: tabular-nums;
+  }
+  .tile-unit { font-size: 11px; color: var(--text-muted); margin-left: 2px; }
+  .tile-docks { font-size: 11px; color: var(--text-secondary); margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .tile-foot { font-size: 10px; color: var(--text-muted); margin-top: 8px; }
+
+  .refresh-btn {
+    width: 100%; margin-top: 16px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary);
+    font: inherit; font-size: 13px; padding: 11px; border-radius: 10px;
+  }
+  .refresh-btn:active { background: var(--surface-2); }
+
+  footer { margin-top: 20px; font-size: 10.5px; color: var(--text-muted); line-height: 1.6; text-align: center; }
+  footer a { color: var(--text-secondary); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>成城 空き状況</h1>
+    <div class="status-line"><span class="dot" id="statusDot"></span><span id="statusText">…</span></div>
+  </header>
+
+  <div class="grid" id="grid"></div>
+
+  <button class="refresh-btn" id="refreshBtn" type="button">今すぐ更新</button>
+
+  <footer>
+    ドコモ・バイクシェア GBFS(CC BY 4.0)・60秒ごと自動更新<br>
+    <a href="index.html">他のポートも見る →</a>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var GBFS_BASE = "https://api-public.odpt.org/api/v4/gbfs/docomo-cycle-tokyo/";
+  var POLL_MS = 60 * 1000;
+
+  var STATIONS = [
+    { id: "4470", name: "L1-38.オダクル成城学園前第１", capacity: 8 },
+    { id: "4471", name: "L1-39.オダクル成城学園前第２", capacity: 14 },
+    { id: "1670", name: "L1-08.NTT砧ビル", capacity: 20 },
+    { id: "1669", name: "L1-07.NTT成城ビル", capacity: 3 }
+  ];
+
+  var grid = document.getElementById("grid");
+  var statusDot = document.getElementById("statusDot");
+  var statusText = document.getElementById("statusText");
+  var refreshBtn = document.getElementById("refreshBtn");
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function relativeTime(unixSeconds) {
+    var diff = Math.max(0, Math.round(Date.now() / 1000) - unixSeconds);
+    if (diff < 60) return diff + "秒前";
+    if (diff < 3600) return Math.floor(diff / 60) + "分前";
+    return Math.floor(diff / 3600) + "時間前";
+  }
+
+  function classify(status, capacity) {
+    if (!status || status.is_renting === false) return "offline";
+    if (status.num_bikes_available === 0) return "critical";
+    if (capacity && status.num_bikes_available / capacity <= 0.2) return "warning";
+    return "good";
+  }
+
+  function render(statusById) {
+    grid.innerHTML = STATIONS.map(function (s) {
+      var st = statusById[s.id];
+      var state = classify(st, s.capacity);
+      var bikes = st ? st.num_bikes_available : "–";
+      var docks = st ? st.num_docks_available : "–";
+      return (
+        '<div class="tile state-' + state + '">' +
+          '<div class="tile-name">' + escapeHtml(s.name.replace(/^[A-Z0-9-]+\./, "")) + '</div>' +
+          '<div><span class="tile-num">' + bikes + '</span><span class="tile-unit">台</span></div>' +
+          '<div class="tile-docks">空きドック ' + docks + '</div>' +
+          '<div class="tile-foot">' + (st ? escapeHtml(relativeTime(st.last_reported)) : "") + '</div>' +
+        '</div>'
+      );
+    }).join("");
+  }
+
+  function setStatus(mode, text) {
+    statusDot.className = "dot" + (mode === "error" ? " error" : "");
+    statusText.textContent = text;
+  }
+
+  function poll() {
+    setStatus("ok", "更新中");
+    fetch(GBFS_BASE + "station_status.json", { cache: "no-store" })
+      .then(function (res) { if (!res.ok) throw new Error(res.status); return res.json(); })
+      .then(function (json) {
+        var byId = {};
+        json.data.stations.forEach(function (s) { byId[s.station_id] = s; });
+        render(byId);
+        setStatus("ok", new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }));
+      })
+      .catch(function (err) {
+        setStatus("error", "取得失敗");
+        console.error(err);
+      });
+  }
+
+  refreshBtn.addEventListener("click", poll);
+  poll();
+  setInterval(poll, POLL_MS);
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") poll();
+  });
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw.js").catch(function () {});
+  }
+})();
+</script>
+</body>
+</html>
