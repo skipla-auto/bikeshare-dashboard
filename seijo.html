@@ -62,6 +62,16 @@
   .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 3px var(--good-soft); }
   .dot.error { background: var(--critical); box-shadow: 0 0 0 3px var(--critical-soft); }
 
+  .mode-toggle {
+    display: flex; background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 999px; padding: 3px; gap: 2px; margin-bottom: 16px;
+  }
+  .mode-toggle button {
+    flex: 1; border: none; background: none; font: inherit; font-size: 14px; font-weight: 700;
+    color: var(--text-secondary); padding: 10px; border-radius: 999px;
+  }
+  .mode-toggle button.active { background: var(--accent); color: var(--bg); }
+
   .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
   .tile {
     min-width: 0;
@@ -70,17 +80,24 @@
     padding: 16px 14px 14px; box-shadow: var(--shadow);
   }
   .tile.state-warning { border-left-color: var(--warning); }
-  .tile.state-critical { border-left-color: var(--critical); }
+  .tile.state-critical, .tile.state-stuck { border-left-color: var(--critical); }
   .tile.state-offline { border-left-color: var(--border); opacity: .6; }
 
-  .tile-name { font-size: 12px; font-weight: 700; line-height: 1.35; margin-bottom: 10px; min-height: 32px; overflow-wrap: anywhere; }
+  .tile-name { font-size: 12px; font-weight: 700; line-height: 1.35; margin-bottom: 8px; min-height: 32px; overflow-wrap: anywhere; }
   .tile-num {
     font-family: "JetBrains Mono", monospace; font-weight: 700; font-size: 34px;
     line-height: 1; font-variant-numeric: tabular-nums;
   }
   .tile-unit { font-size: 11px; color: var(--text-muted); margin-left: 2px; }
-  .tile-docks { font-size: 11px; color: var(--text-secondary); margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .tile-secondary { font-size: 11px; color: var(--text-secondary); margin-top: 6px; font-variant-numeric: tabular-nums; }
   .tile-foot { font-size: 10px; color: var(--text-muted); margin-top: 8px; }
+
+  .state-badge {
+    display: none; font-size: 10px; font-weight: 700; padding: 2px 8px;
+    border-radius: 999px; margin-bottom: 6px;
+  }
+  .tile.state-warning .state-badge { display: inline-block; background: var(--warning-soft); color: var(--warning); }
+  .tile.state-critical .state-badge, .tile.state-stuck .state-badge { display: inline-block; background: var(--critical-soft); color: var(--critical); }
 
   .refresh-btn {
     width: 100%; margin-top: 16px;
@@ -99,6 +116,11 @@
     <h1>成城 空き状況</h1>
     <div class="status-line"><span class="dot" id="statusDot"></span><span id="statusText">…</span></div>
   </header>
+
+  <div class="mode-toggle" id="modeToggle" role="group" aria-label="表示モード">
+    <button type="button" data-mode="rent">🚲 借りる</button>
+    <button type="button" data-mode="return">🅿️ 返す</button>
+  </div>
 
   <div class="grid" id="grid"></div>
 
@@ -127,6 +149,27 @@
   var statusDot = document.getElementById("statusDot");
   var statusText = document.getElementById("statusText");
   var refreshBtn = document.getElementById("refreshBtn");
+  var modeToggle = document.getElementById("modeToggle");
+
+  var MODE_KEY = "seijo.mode.v1";
+  var mode = loadMode();
+  var lastStatusById = null;
+
+  function loadMode() {
+    try {
+      var raw = localStorage.getItem(MODE_KEY);
+      if (raw === "rent" || raw === "return") return raw;
+    } catch (e) {}
+    return "rent";
+  }
+  function saveMode() {
+    try { localStorage.setItem(MODE_KEY, mode); } catch (e) {}
+  }
+  function renderModeToggle() {
+    modeToggle.querySelectorAll("button").forEach(function (btn) {
+      btn.classList.toggle("active", btn.dataset.mode === mode);
+    });
+  }
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
@@ -141,24 +184,40 @@
     return Math.floor(diff / 3600) + "時間前";
   }
 
-  function classify(status, capacity) {
-    if (!status || status.is_renting === false) return "offline";
-    if (status.num_bikes_available === 0) return "critical";
-    if (capacity && status.num_bikes_available / capacity <= 0.2) return "warning";
-    return "good";
+  function classify(status, capacity, currentMode) {
+    if (!status) return { state: "offline", badge: "" };
+    var bikes = status.num_bikes_available;
+    var docks = status.num_docks_available;
+    var canRent = status.is_renting !== false;
+    var canReturn = status.is_returning !== false;
+
+    if (bikes === 0 && !canReturn) return { state: "stuck", badge: "満車・返却停止" };
+    if (bikes === 0 && docks === 0) return { state: "stuck", badge: "利用不可" };
+
+    if (currentMode === "return") {
+      if (!canReturn || docks === 0) return { state: "critical", badge: "返却不可" };
+      if (capacity && docks / capacity <= 0.2) return { state: "warning", badge: "空き枠わずか" };
+      return { state: "good", badge: "" };
+    }
+    if (!canRent || bikes === 0) return { state: "critical", badge: "貸出不可" };
+    if (capacity && bikes / capacity <= 0.2) return { state: "warning", badge: "残りわずか" };
+    return { state: "good", badge: "" };
   }
 
   function render(statusById) {
     grid.innerHTML = STATIONS.map(function (s) {
       var st = statusById[s.id];
-      var state = classify(st, s.capacity);
+      var c = classify(st, s.capacity, mode);
       var bikes = st ? st.num_bikes_available : "–";
       var docks = st ? st.num_docks_available : "–";
+      var primary = mode === "return" ? docks : bikes;
+      var secondaryLabel = mode === "return" ? "利用可能な自転車 " + bikes : "空きドック " + docks;
       return (
-        '<div class="tile state-' + state + '">' +
+        '<div class="tile state-' + c.state + '">' +
           '<div class="tile-name">' + escapeHtml(s.name.replace(/^[A-Z0-9-]+\./, "")) + '</div>' +
-          '<div><span class="tile-num">' + bikes + '</span><span class="tile-unit">台</span></div>' +
-          '<div class="tile-docks">空きドック ' + docks + '</div>' +
+          (c.badge ? '<div class="state-badge">' + (c.state === "stuck" ? "⚠ " : "") + escapeHtml(c.badge) + '</div>' : '') +
+          '<div><span class="tile-num">' + primary + '</span><span class="tile-unit">台</span></div>' +
+          '<div class="tile-secondary">' + escapeHtml(secondaryLabel) + '</div>' +
           '<div class="tile-foot">' + (st ? escapeHtml(relativeTime(st.last_reported)) : "") + '</div>' +
         '</div>'
       );
@@ -177,6 +236,7 @@
       .then(function (json) {
         var byId = {};
         json.data.stations.forEach(function (s) { byId[s.station_id] = s; });
+        lastStatusById = byId;
         render(byId);
         setStatus("ok", new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }));
       })
@@ -187,6 +247,16 @@
   }
 
   refreshBtn.addEventListener("click", poll);
+  modeToggle.querySelectorAll("button").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      if (btn.dataset.mode === mode) return;
+      mode = btn.dataset.mode;
+      saveMode();
+      renderModeToggle();
+      if (lastStatusById) render(lastStatusById);
+    });
+  });
+  renderModeToggle();
   poll();
   setInterval(poll, POLL_MS);
   document.addEventListener("visibilitychange", function () {

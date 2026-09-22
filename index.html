@@ -147,6 +147,29 @@
   button.refresh:hover { color: var(--text-primary); border-color: var(--accent); }
   button.refresh:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+  .mode-toggle {
+    display: inline-flex;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px;
+    gap: 2px;
+    margin-bottom: 18px;
+  }
+  .mode-toggle button {
+    border: none;
+    background: none;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    padding: 7px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .mode-toggle button.active { background: var(--accent); color: var(--accent-ink); }
+  .mode-toggle button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
   .search-panel {
     position: relative;
     background: var(--surface);
@@ -238,10 +261,12 @@
     gap: 10px;
   }
   .tile.state-warning { border-left-color: var(--warning); }
-  .tile.state-critical { border-left-color: var(--critical); }
+  .tile.state-critical, .tile.state-stuck { border-left-color: var(--critical); }
   .tile.state-offline { border-left-color: var(--border); opacity: 0.6; }
 
   .tile-head { display: flex; justify-content: space-between; gap: 8px; }
+
+  .tile-name-wrap { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
 
   .tile-name {
     font-family: "Zen Kaku Gothic New", "Noto Sans JP", sans-serif;
@@ -289,6 +314,23 @@
     color: var(--text-muted);
     margin-top: 2px;
   }
+
+  .stat.is-secondary .num { font-size: 17px; color: var(--text-secondary); }
+  .stat.is-secondary .label { color: var(--text-muted); }
+
+  .state-badge {
+    display: none;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .tile.state-warning .state-badge { display: inline-flex; background: var(--warning-soft); color: var(--warning); }
+  .tile.state-critical .state-badge { display: inline-flex; background: var(--critical-soft); color: var(--critical); }
+  .tile.state-stuck .state-badge { display: inline-flex; background: var(--critical-soft); color: var(--critical); }
 
   .capacity-bar {
     height: 7px;
@@ -339,6 +381,11 @@
     </div>
   </header>
 
+  <div class="mode-toggle" id="modeToggle" role="group" aria-label="表示モード">
+    <button type="button" data-mode="rent">🚲 借りる</button>
+    <button type="button" data-mode="return">🅿️ 返す</button>
+  </div>
+
   <div class="search-panel">
     <label for="stationSearch">ポートを検索して追加</label>
     <input id="stationSearch" type="text" placeholder="例: 新宿駅、六本木、秋葉原…" autocomplete="off">
@@ -362,12 +409,14 @@
   var STATION_INFO_CACHE_KEY = "bikeshare.stationInfo.v1";
   var STATION_INFO_TTL_MS = 6 * 60 * 60 * 1000;
   var PINNED_KEY = "bikeshare.pinned.v1";
+  var MODE_KEY = "bikeshare.mode.v1";
   var POLL_MS = 60 * 1000;
 
   var DEFAULT_PINNED = ["10926", "10252", "10303", "4470", "1669", "4471", "1670"];
 
   var stationInfoById = {};
   var pinned = loadPinned();
+  var mode = loadMode();
   var pollTimer = null;
 
   var grid = document.getElementById("grid");
@@ -377,6 +426,25 @@
   var statusDot = document.getElementById("statusDot");
   var statusText = document.getElementById("statusText");
   var refreshBtn = document.getElementById("refreshBtn");
+  var modeToggle = document.getElementById("modeToggle");
+
+  function loadMode() {
+    try {
+      var raw = localStorage.getItem(MODE_KEY);
+      if (raw === "rent" || raw === "return") return raw;
+    } catch (e) {}
+    return "rent";
+  }
+
+  function saveMode() {
+    try { localStorage.setItem(MODE_KEY, mode); } catch (e) {}
+  }
+
+  function renderModeToggle() {
+    modeToggle.querySelectorAll("button").forEach(function (btn) {
+      btn.classList.toggle("active", btn.dataset.mode === mode);
+    });
+  }
 
   function loadPinned() {
     try {
@@ -446,22 +514,33 @@
     wireRemoveButtons();
   }
 
-  function tileInnerHtml(info, status) {
+  function tileInnerHtml(info, status, classification) {
     var name = info ? info.name : "読み込み中…";
     var code = info ? "#" + info.station_id + " ・ 定員 " + info.capacity : "";
     var bikes = status ? status.num_bikes_available : "–";
     var docks = status ? status.num_docks_available : "–";
+    var badge = classification ? classification.badge : "";
+
+    var bikeStat = '<div class="stat"><span class="num">' + bikes + '</span><span class="label">利用可能な自転車</span></div>';
+    var dockStat = '<div class="stat"><span class="num">' + docks + '</span><span class="label">空きドック</span></div>';
+    var statRow;
+    if (mode === "return") {
+      statRow = '<div class="stat-row">' + dockStat + bikeStat.replace('class="stat"', 'class="stat is-secondary"') + '</div>';
+    } else {
+      statRow = '<div class="stat-row">' + bikeStat + dockStat.replace('class="stat"', 'class="stat is-secondary"') + '</div>';
+    }
+
     return (
       '<div class="tile-head">' +
-        '<div class="tile-name">' + escapeHtml(name) + '<span class="tile-code">' + escapeHtml(code) + '</span></div>' +
+        '<div class="tile-name-wrap">' +
+          '<div class="tile-name">' + escapeHtml(name) + '<span class="tile-code">' + escapeHtml(code) + '</span></div>' +
+          (badge ? '<span class="state-badge">' + (classification.stuck ? "⚠ " : "") + escapeHtml(badge) + '</span>' : '') +
+        '</div>' +
         '<button class="remove-btn" type="button" aria-label="このポートを削除">×</button>' +
       '</div>' +
-      '<div class="stat-row">' +
-        '<div class="stat"><span class="num">' + bikes + '</span><span class="label">利用可能な自転車</span></div>' +
-        '<div class="stat"><span class="num">' + docks + '</span><span class="label">空きドック</span></div>' +
-      '</div>' +
+      statRow +
       '<div class="capacity-bar" aria-hidden="true"><div class="bikes" style="flex:' + (status ? status.num_bikes_available : 0) + '"></div><div class="docks" style="flex:' + (status ? status.num_docks_available : 0) + '"></div></div>' +
-      '<div class="tile-foot"><span>' + (status ? relativeTime(status.last_reported) : "") + '</span><span>' + (status && status.is_renting === false ? "貸出停止中" : "") + '</span></div>'
+      '<div class="tile-foot"><span>' + (status ? relativeTime(status.last_reported) : "") + '</span></div>'
     );
   }
 
@@ -478,11 +557,30 @@
     return Math.floor(diff / 3600) + "時間前";
   }
 
-  function classifyState(status, capacity) {
-    if (!status || status.is_renting === false) return "offline";
-    if (status.num_bikes_available === 0) return "critical";
-    if (capacity && status.num_bikes_available / capacity <= 0.2) return "warning";
-    return "good";
+  function classifyState(status, capacity, currentMode) {
+    if (!status) return { state: "offline", badge: "" };
+
+    var bikes = status.num_bikes_available;
+    var docks = status.num_docks_available;
+    var canRent = status.is_renting !== false;
+    var canReturn = status.is_returning !== false;
+
+    // Stuck states: mode-independent, take priority over everything else.
+    if (bikes === 0 && !canReturn) {
+      return { state: "stuck", badge: "満車・返却停止", stuck: true };
+    }
+    if (bikes === 0 && docks === 0) {
+      return { state: "stuck", badge: "利用不可", stuck: true };
+    }
+
+    if (currentMode === "return") {
+      if (!canReturn || docks === 0) return { state: "critical", badge: "返却不可" };
+      if (capacity && docks / capacity <= 0.2) return { state: "warning", badge: "空き枠わずか" };
+      return { state: "good", badge: "" };
+    }
+    if (!canRent || bikes === 0) return { state: "critical", badge: "貸出不可" };
+    if (capacity && bikes / capacity <= 0.2) return { state: "warning", badge: "残りわずか" };
+    return { state: "good", badge: "" };
   }
 
   function renderStatuses(statusById) {
@@ -492,10 +590,10 @@
       var info = stationInfoById[id];
       var status = statusById[id];
       var tile = document.createElement("div");
-      var state = classifyState(status, info ? info.capacity : 0);
-      tile.className = "tile state-" + state;
+      var classification = classifyState(status, info ? info.capacity : 0, mode);
+      tile.className = "tile state-" + classification.state;
       tile.dataset.id = id;
-      tile.innerHTML = tileInnerHtml(info, status);
+      tile.innerHTML = tileInnerHtml(info, status, classification);
       grid.appendChild(tile);
     });
     wireRemoveButtons();
@@ -513,8 +611,10 @@
     });
   }
 
-  function setStatus(mode, text) {
-    statusDot.className = "dot" + (mode === "error" ? " error" : mode === "stale" ? " stale" : "");
+  var lastStatusById = null;
+
+  function setStatus(kind, text) {
+    statusDot.className = "dot" + (kind === "error" ? " error" : kind === "stale" ? " stale" : "");
     statusText.textContent = text;
   }
 
@@ -523,6 +623,7 @@
     fetchJson("station_status.json").then(function (json) {
       var statusById = {};
       json.data.stations.forEach(function (s) { statusById[s.station_id] = s; });
+      lastStatusById = statusById;
       renderStatuses(statusById);
       setStatus("ok", "最終更新 " + new Date().toLocaleTimeString("ja-JP"));
     }).catch(function (err) {
@@ -570,6 +671,21 @@
     if (!e.target.closest(".search-panel")) searchResults.innerHTML = "";
   });
   refreshBtn.addEventListener("click", poll);
+
+  modeToggle.querySelectorAll("button").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      if (btn.dataset.mode === mode) return;
+      mode = btn.dataset.mode;
+      saveMode();
+      renderModeToggle();
+      if (lastStatusById) renderStatuses(lastStatusById);
+    });
+  });
+  renderModeToggle();
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") poll();
+  });
 
   ensureStationInfo().then(function () {
     renderSkeleton();
