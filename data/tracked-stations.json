@@ -1,7 +1,6 @@
 [
-  { "station_id": "10926", "name": "D6-25.新宿駅東南口自転車駐輪場", "lat": 35.689755, "lon": 139.701323, "role": "near_station" },
-  { "station_id": "10303", "name": "A3-28.秋葉原駅電気街口(西側交通広場)", "lat": 35.699173, "lon": 139.772629, "role": "near_station" },
-  { "station_id": "10252", "name": "C2-12.六本木ファーストビル", "lat": 35.66249, "lon": 139.741397, "role": "reference" },
+  { "station_id": "1108", "name": "C2-25.アパホテル＆リゾート＜六本木駅東＞", "lat": 35.661783, "lon": 139.737242, "role": "near_station" },
+  { "station_id": "10252", "name": "C2-12.六本木ファーストビル", "lat": 35.66249, "lon": 139.741397, "role": "near_station" },
   { "station_id": "10825", "name": "C4-06.白金プラチナレジデンス", "lat": 35.644134, "lon": 139.723432, "role": "residential_origin" },
   { "station_id": "10082", "name": "C2-02.六本木ヒルズ", "lat": 35.661158, "lon": 139.728533, "role": "office_district" },
   { "station_id": "3029", "name": "C2-32.麻布台ヒルズ", "lat": 35.661158, "lon": 139.740036, "role": "office_district" }
