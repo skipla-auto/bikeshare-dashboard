@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
-"""Fetch current GBFS status for the tracked stations, append one NDJSON
-snapshot line per station to data/history.ndjson, and push the result.
+"""Fetch current GBFS status for the tracked stations and append one NDJSON
+snapshot line per station to data/history.ndjson.
 
-Meant to be invoked hourly by a scheduled agent. Standard library only
-(no pip install) so it runs unmodified in any cloud sandbox.
+Two invocation modes, run by separate LaunchAgents:
+  (default)      fetch + append + git commit + push. Run hourly - this is
+                 what actually publishes the accumulated history.
+  --append-only  fetch + append only, no git operations. Run every few
+                 minutes for finer time resolution; the next hourly
+                 (default-mode) run commits and pushes everything that
+                 piled up in between in one shot, so git history stays
+                 one commit per hour regardless of sampling frequency.
+
+Standard library only (no pip install) so it runs unmodified anywhere.
 """
 import json
 import subprocess
@@ -64,6 +72,8 @@ def ensure_git_identity():
 
 
 def main():
+    append_only = "--append-only" in sys.argv[1:]
+
     tracked = json.loads(TRACKED_STATIONS_PATH.read_text())
     tracked_by_id = {s["station_id"]: s for s in tracked}
 
@@ -120,6 +130,10 @@ def main():
     with HISTORY_PATH.open("a", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
+    if append_only:
+        print(f"appended {len(lines)} station snapshots for {now_utc.isoformat(timespec='seconds')} (no commit)")
+        return 0
+
     ensure_git_identity()
     run_git("add", "data/history.ndjson")
     diff = subprocess.run(
@@ -129,9 +143,14 @@ def main():
         print("no changes to commit")
         return 0
 
+    added_lines = subprocess.run(
+        ["git", "diff", "--cached", "--numstat", "--", "data/history.ndjson"],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+    ).stdout.split("\t")[0].strip() or str(len(lines))
+
     run_git("commit", "-m", f"snapshot {now_utc.strftime('%Y-%m-%dT%H:%MZ')}")
     run_git("push")
-    print(f"committed {len(lines)} station snapshots for {now_utc.isoformat(timespec='seconds')}")
+    print(f"committed {added_lines} accumulated station snapshots (this run fetched {len(lines)}) at {now_utc.isoformat(timespec='seconds')}")
     return 0
 
 
