@@ -12,6 +12,7 @@
     --text-primary: #12211d; --text-secondary: #4d625c; --text-muted: #82958f;
     --accent: #0e8a70; --accent-soft: #dcf2ec;
     --holiday: #a8632a; --holiday-soft: #f3e6d6;
+    --critical: #d23c3c; --critical-soft: #fbe4e4;
     --shadow: 0 1px 2px rgba(18,33,29,.05), 0 8px 24px rgba(18,33,29,.07);
   }
   @media (prefers-color-scheme: dark) {
@@ -20,6 +21,7 @@
       --text-primary: #eaf3f0; --text-secondary: #a7bcb5; --text-muted: #718a82;
       --accent: #45d9b6; --accent-soft: #163a30;
       --holiday: #b5793a; --holiday-soft: #33261a;
+      --critical: #f2716f; --critical-soft: #3d1d1e;
       --shadow: 0 1px 2px rgba(0,0,0,.35), 0 8px 24px rgba(0,0,0,.4);
     }
   }
@@ -28,6 +30,7 @@
     --text-primary: #eaf3f0; --text-secondary: #a7bcb5; --text-muted: #718a82;
     --accent: #45d9b6; --accent-soft: #163a30;
     --holiday: #b5793a; --holiday-soft: #33261a;
+    --critical: #f2716f; --critical-soft: #3d1d1e;
     --shadow: 0 1px 2px rgba(0,0,0,.35), 0 8px 24px rgba(0,0,0,.4);
   }
   * { box-sizing: border-box; }
@@ -98,6 +101,25 @@
 
   footer { margin-top: 24px; font-size: 11.5px; color: var(--text-muted); line-height: 1.7; }
   footer a { color: var(--text-secondary); }
+
+  .onset-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    padding: 16px 18px 12px; margin-bottom: 20px; box-shadow: var(--shadow);
+  }
+  .onset-head h2 {
+    font-family: "Zen Kaku Gothic New", "Noto Sans JP", sans-serif;
+    font-weight: 700; font-size: 15px; margin: 0 0 2px;
+  }
+  .onset-sub { font-size: 11.5px; color: var(--text-muted); margin: 0 0 6px; }
+  svg.onset-chart { display: block; width: 100%; height: auto; overflow: visible; }
+  .onset-gridline { stroke: var(--border); stroke-width: 1; }
+  .onset-axis-label { fill: var(--text-muted); font-size: 9px; font-family: "JetBrains Mono", monospace; }
+  .onset-row-label { fill: var(--text-primary); font-size: 11px; font-weight: 700; font-family: "Noto Sans JP", sans-serif; }
+  .onset-row-role { fill: var(--text-muted); font-size: 9.5px; font-family: "Noto Sans JP", sans-serif; }
+  .onset-range { stroke: var(--critical); stroke-width: 3; stroke-linecap: round; opacity: 0.35; }
+  .onset-dot { fill: var(--critical); stroke: var(--surface); stroke-width: 2; }
+  .onset-dot-label { fill: var(--text-secondary); font-size: 9.5px; font-family: "JetBrains Mono", monospace; }
+  .onset-none { fill: var(--text-muted); font-size: 10.5px; font-family: "Noto Sans JP", sans-serif; }
 </style>
 </head>
 <body>
@@ -107,6 +129,14 @@
   <p class="subtitle">ポートごとの時刻別・平均空き自転車台数。実際に収集したデータのみ使用しています</p>
 
   <div class="meta-bar" id="metaBar">読み込み中…</div>
+
+  <div class="onset-card" id="onsetCard" hidden>
+    <div class="onset-head">
+      <h2>いつからダメになるか</h2>
+      <p class="onset-sub">平日の朝(5〜13時)、各ポートで初めて「借りられない/返せない」になった時刻</p>
+    </div>
+    <svg class="onset-chart" id="onsetChart" viewBox="0 0 640 190" preserveAspectRatio="xMidYMid meet"></svg>
+  </div>
 
   <div class="legend-line">
     <span class="legend-key"><span class="legend-swatch weekday"></span>平日</span>
@@ -156,6 +186,93 @@
     return text.split("\n").filter(function (l) { return l.trim(); }).map(function (l) { return JSON.parse(l); });
   }
 
+  var ONSET_WINDOW_START = 5, ONSET_WINDOW_END = 13; // JST hours to search within
+
+  function jstHourFraction(ts) {
+    var d = new Date(ts);
+    var jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+    return jst.getUTCHours() + jst.getUTCMinutes() / 60;
+  }
+  function jstTimeLabel(ts) {
+    var d = new Date(ts);
+    var jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+    var h = jst.getUTCHours(), m = jst.getUTCMinutes();
+    return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m;
+  }
+
+  function renderOnsetChart(stations, allRows) {
+    var card = document.getElementById("onsetCard");
+    var svg = document.getElementById("onsetChart");
+    var weekdayRows = allRows.filter(function (r) { return !r.is_holiday; });
+    if (weekdayRows.length === 0) { card.hidden = true; return; }
+
+    // metric: office_district / near_station -> docks (fills up, can't return)
+    //         residential_origin (and anything else) -> bikes (runs dry, can't rent)
+    function metricFor(role) { return (role === "office_district" || role === "near_station") ? "docks_available" : "bikes_available"; }
+    function labelFor(role) { return metricFor(role) === "docks_available" ? "満車(返却不可)" : "空(貸出不可)"; }
+
+    var byStationDate = {};
+    weekdayRows.forEach(function (r) {
+      byStationDate[r.station_id] = byStationDate[r.station_id] || {};
+      (byStationDate[r.station_id][r.date_jst] = byStationDate[r.station_id][r.date_jst] || []).push(r);
+    });
+
+    var rowsOut = stations.map(function (s) {
+      var metric = metricFor(s.role);
+      var byDate = byStationDate[s.station_id] || {};
+      var onsets = [];
+      Object.keys(byDate).forEach(function (date) {
+        var recs = byDate[date].filter(function (r) {
+          var hf = jstHourFraction(r.ts);
+          return hf >= ONSET_WINDOW_START && hf < ONSET_WINDOW_END;
+        }).sort(function (a, b) { return a.ts.localeCompare(b.ts); });
+        var firstBad = recs.filter(function (r) { return r[metric] === 0; })[0];
+        if (firstBad) onsets.push({ date: date, ts: firstBad.ts, hf: jstHourFraction(firstBad.ts), label: jstTimeLabel(firstBad.ts) });
+      });
+      return { station: s, metric: metric, metricLabel: labelFor(s.role), onsets: onsets };
+    });
+
+    if (rowsOut.every(function (r) { return r.onsets.length === 0; })) { card.hidden = true; return; }
+    card.hidden = false;
+
+    var W = 680, rowH = 34, padTop = 14, padBottom = 22, labelW = 225;
+    var H = padTop + padBottom + rowH * rowsOut.length;
+    var plotL = labelW, plotR = W - 12, plotW = plotR - plotL;
+
+    function xFor(hf) { return plotL + ((hf - ONSET_WINDOW_START) / (ONSET_WINDOW_END - ONSET_WINDOW_START)) * plotW; }
+
+    var svgParts = [];
+    svgParts.push('<line class="onset-gridline" x1="' + plotL + '" y1="' + padTop + '" x2="' + plotL + '" y2="' + (H - padBottom) + '"></line>');
+    for (var h = ONSET_WINDOW_START; h <= ONSET_WINDOW_END; h++) {
+      var x = xFor(h);
+      svgParts.push('<line class="onset-gridline" x1="' + x + '" y1="' + padTop + '" x2="' + x + '" y2="' + (H - padBottom + 4) + '"></line>');
+      svgParts.push('<text class="onset-axis-label" x="' + x + '" y="' + (H - padBottom + 16) + '" text-anchor="middle">' + h + '時</text>');
+    }
+
+    rowsOut.forEach(function (r, i) {
+      var cy = padTop + rowH * i + rowH / 2;
+      svgParts.push('<text class="onset-row-label" x="0" y="' + (cy - 3) + '">' + escapeHtml(r.station.name.replace(/^[A-Z0-9-]+\./, "")) + '</text>');
+      svgParts.push('<text class="onset-row-role" x="0" y="' + (cy + 10) + '">' + escapeHtml(r.metricLabel) + '</text>');
+      if (r.onsets.length === 0) {
+        svgParts.push('<text class="onset-none" x="' + plotL + '" y="' + (cy + 4) + '">5〜13時は発生せず</text>');
+        return;
+      }
+      var xs = r.onsets.map(function (o) { return xFor(o.hf); });
+      if (xs.length > 1) {
+        svgParts.push('<line class="onset-range" x1="' + Math.min.apply(null, xs) + '" y1="' + cy + '" x2="' + Math.max.apply(null, xs) + '" y2="' + cy + '"></line>');
+      }
+      r.onsets.forEach(function (o) {
+        var x = xFor(o.hf);
+        svgParts.push('<circle class="onset-dot" cx="' + x + '" cy="' + cy + '" r="5"><title>' + o.date + ' ' + o.label + '</title></circle>');
+      });
+      var labelText = r.onsets.map(function (o) { return o.label; }).join(" / ");
+      svgParts.push('<text class="onset-dot-label" x="' + (Math.max.apply(null, xs) + 10) + '" y="' + (cy + 4) + '">' + escapeHtml(labelText) + '</text>');
+    });
+
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    svg.innerHTML = svgParts.join("");
+  }
+
   Promise.all([
     fetch("data/tracked-stations.json", { cache: "no-store" }).then(function (r) { return r.json(); }),
     fetch("data/history.ndjson", { cache: "no-store" }).then(function (r) { return r.text(); })
@@ -187,6 +304,8 @@
       "<span>総記録行数 <strong>" + rows.length + "</strong></span>";
 
     function avg(arr) { return arr.length ? arr.reduce(function (a, b) { return a + b; }, 0) / arr.length : null; }
+
+    renderOnsetChart(stations, rows);
 
     var tableRows = [];
     var W = 320, H = 130, PAD_L = 22, PAD_R = 8, PAD_T = 10, PAD_B = 16;
