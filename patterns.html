@@ -66,6 +66,7 @@
   .card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 14px 10px; box-shadow: var(--shadow); }
   .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
   .card-name { font-family: "Zen Kaku Gothic New", "Noto Sans JP", sans-serif; font-weight: 700; font-size: 13px; line-height: 1.3; }
+  .card-metric { display: block; font-family: "Noto Sans JP", sans-serif; font-weight: 500; font-size: 10px; color: var(--text-muted); margin-top: 2px; }
   .card-role { font-size: 10.5px; color: var(--text-muted); }
 
   svg.chart { display: block; width: 100%; height: auto; overflow: visible; }
@@ -178,7 +179,7 @@
   <button class="table-toggle" id="tableToggle" type="button" hidden>生データを表で見る</button>
   <div class="table-wrap" id="tableWrap" hidden>
     <table>
-      <thead><tr><th>ポート</th><th>区分</th><th>時</th><th>平均台数</th><th>サンプル数</th></tr></thead>
+      <thead><tr><th>ポート</th><th>指標</th><th>区分</th><th>時</th><th>平均台数</th><th>サンプル数</th></tr></thead>
       <tbody id="tableBody"></tbody>
     </table>
   </div>
@@ -224,6 +225,15 @@
   // silently leak into the "weekday" bucket once a Saturday's data exists.
   function isCommuteDay(r) { return r.weekday_jst < 5 && !r.is_holiday; }
 
+  // Which count actually represents "this port failed" depends on the
+  // port's role: an office/near-station port's failure mode is filling up
+  // (can't return), a residential port's is running dry (can't rent). Every
+  // chart on this page must use this same function - two sections silently
+  // disagreeing on which number matters was exactly the bug a panel review
+  // caught here (see docs/reviews/patterns-html-ux-review-2026-09-28.md).
+  function metricFor(role) { return (role === "office_district" || role === "near_station") ? "docks_available" : "bikes_available"; }
+  function metricLabelFor(role) { return metricFor(role) === "docks_available" ? "満車(返却不可)" : "空(貸出不可)"; }
+
   function jstHourFraction(ts) {
     var d = new Date(ts);
     var jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
@@ -243,11 +253,6 @@
     var weekdayRows = allRows.filter(isCommuteDay);
     if (weekdayRows.length === 0) { card.hidden = true; return; }
 
-    // metric: office_district / near_station -> docks (fills up, can't return)
-    //         residential_origin (and anything else) -> bikes (runs dry, can't rent)
-    function metricFor(role) { return (role === "office_district" || role === "near_station") ? "docks_available" : "bikes_available"; }
-    function labelFor(role) { return metricFor(role) === "docks_available" ? "満車(返却不可)" : "空(貸出不可)"; }
-
     var byStationDate = {};
     weekdayRows.forEach(function (r) {
       byStationDate[r.station_id] = byStationDate[r.station_id] || {};
@@ -266,7 +271,7 @@
         var firstBad = recs.filter(function (r) { return r[metric] === 0; })[0];
         if (firstBad) onsets.push({ date: date, ts: firstBad.ts, hf: jstHourFraction(firstBad.ts), label: jstTimeLabel(firstBad.ts) });
       });
-      return { station: s, metric: metric, metricLabel: labelFor(s.role), onsets: onsets };
+      return { station: s, metric: metric, metricLabel: metricLabelFor(s.role), onsets: onsets };
     });
 
     if (rowsOut.every(function (r) { return r.onsets.length === 0; })) { card.hidden = true; return; }
@@ -319,12 +324,23 @@
       return;
     }
 
+    var stationById = {};
+    stations.forEach(function (s) { stationById[s.station_id] = s; });
+
     // aggregate: station_id -> hour -> {weekday:[vals], holiday:[vals]}
+    // Which field to read depends on the station's role (metricFor) - an
+    // office/near-station port's failure mode is filling up, a residential
+    // port's is running dry. Using bikes_available unconditionally here was
+    // the P0 bug the panel review caught: it silently disagreed with the
+    // onset chart above about which number represents "this port failed".
     var agg = {};
     stations.forEach(function (s) { agg[s.station_id] = {}; for (var h = 0; h < 24; h++) agg[s.station_id][h] = { weekday: [], holiday: [] }; });
     rows.forEach(function (r) {
+      var station = stationById[r.station_id];
+      if (!station) return;
       var bucket = agg[r.station_id][r.hour_jst];
-      (isCommuteDay(r) ? bucket.weekday : bucket.holiday).push(r.bikes_available);
+      var value = r[metricFor(station.role)];
+      (isCommuteDay(r) ? bucket.weekday : bucket.holiday).push(value);
     });
 
     var weekdayDates = {}, holidayDates = {};
@@ -346,14 +362,16 @@
 
     stations.forEach(function (s) {
       var hourly = agg[s.station_id];
+      var metric = metricFor(s.role);
+      var metricShortLabel = metric === "docks_available" ? "空きドック" : "利用可能な自転車";
       var maxVal = 1;
       var wdPoints = [], hdPoints = [];
       for (var h = 0; h < 24; h++) {
         var wdAvg = avg(hourly[h].weekday), hdAvg = avg(hourly[h].holiday);
         if (wdAvg !== null) { wdPoints.push({ h: h, v: wdAvg, n: hourly[h].weekday.length }); maxVal = Math.max(maxVal, wdAvg); }
         if (hdAvg !== null) { hdPoints.push({ h: h, v: hdAvg, n: hourly[h].holiday.length }); maxVal = Math.max(maxVal, hdAvg); }
-        if (wdAvg !== null) tableRows.push({ name: s.name, kind: "平日", h: h, avg: wdAvg, n: hourly[h].weekday.length });
-        if (hdAvg !== null) tableRows.push({ name: s.name, kind: "休日", h: h, avg: hdAvg, n: hourly[h].holiday.length });
+        if (wdAvg !== null) tableRows.push({ name: s.name, metric: metricShortLabel, kind: "平日", h: h, avg: wdAvg, n: hourly[h].weekday.length });
+        if (hdAvg !== null) tableRows.push({ name: s.name, metric: metricShortLabel, kind: "休日", h: h, avg: hdAvg, n: hourly[h].holiday.length });
       }
       maxVal = Math.ceil(maxVal * 1.15);
 
@@ -385,7 +403,7 @@
       card.className = "card";
       card.innerHTML =
         '<div class="card-head">' +
-          '<div class="card-name">' + escapeHtml(s.name) + '</div>' +
+          '<div class="card-name">' + escapeHtml(s.name) + '<span class="card-metric">' + escapeHtml(metricShortLabel) + '平均</span></div>' +
           '<div class="card-role">' + escapeHtml(ROLE_LABELS[s.role] || "") + '</div>' +
         '</div>' +
         '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' +
@@ -410,7 +428,7 @@
         var wd = hourly[h].weekday, hd = hourly[h].holiday;
         var wdAvg = avg(wd), hdAvg = avg(hd);
         if (wdAvg === null && hdAvg === null) { tooltip.style.opacity = "0"; return; }
-        var html = "<div>" + h + "時台</div>";
+        var html = "<div>" + h + "時台・" + escapeHtml(metricShortLabel) + "</div>";
         if (wdAvg !== null) html += '<div class="k-weekday">平日: <strong>' + wdAvg.toFixed(1) + '台</strong> (n=' + wd.length + ')</div>';
         if (hdAvg !== null) html += '<div class="k-holiday">休日: <strong>' + hdAvg.toFixed(1) + '台</strong> (n=' + hd.length + ')</div>';
         tooltip.innerHTML = html;
@@ -422,7 +440,7 @@
     });
 
     tableBody.innerHTML = tableRows.map(function (r) {
-      return "<tr><td>" + escapeHtml(r.name) + "</td><td>" + r.kind + "</td><td>" + r.h + "時</td><td>" + r.avg.toFixed(1) + "台</td><td>" + r.n + "</td></tr>";
+      return "<tr><td>" + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.metric) + "</td><td>" + r.kind + "</td><td>" + r.h + "時</td><td>" + r.avg.toFixed(1) + "台</td><td>" + r.n + "</td></tr>";
     }).join("");
     tableToggle.hidden = false;
     tableToggle.addEventListener("click", function () {
